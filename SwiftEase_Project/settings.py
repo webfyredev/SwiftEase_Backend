@@ -25,10 +25,11 @@ SECRET_KEY = 'django-insecure-(czm&*sp(1gl4x7_00)uk@de9s7)!@5fbm$ve6i9pa)96qn4gx
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+ALLOWED_HOSTS = ['swiftease-backend.onrender.com','localhost', '127.0.0.1']
 
 CSRF_TRUSTED_ORIGINS = [
     'http://localhost:5173',
+    'https://swiftease-backend.onrender.com/',
     'http://127.0.0.1:5173'
 ]
 
