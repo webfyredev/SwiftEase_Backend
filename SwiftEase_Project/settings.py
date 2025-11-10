@@ -29,10 +29,11 @@ ALLOWED_HOSTS = ['swiftease-backend.onrender.com','localhost', '127.0.0.1']
 
 CSRF_TRUSTED_ORIGINS = [
     'http://localhost:5173',
-    'https://swiftease-backend.onrender.com/',
+    'https://swiftease-backend.onrender.com',
     'http://127.0.0.1:5173'
 ]
-
+CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SECURE = True
 
 # Application definition
 
