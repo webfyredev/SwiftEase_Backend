@@ -35,7 +35,7 @@ class ShipmentListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Shipment
-        fields = ["id", "shipment_code", "service_name", "sender_name", "receiver_name", "receiver_city", "receiver_state", "total_price", "is_paid", "status", "latest_status", "created_at"]
+        fields = ["id", "shipment_code", "service_name", "sender_name", "receiver_name", "receiver_city", "receiver_state", "total_price", "is_paid", "status", "latest_status", "created_at", "weight_kg"]
         # fields = "__all__"
 
     def get_latest_status(self, obj):

@@ -3,8 +3,8 @@ from .views import *
 
 urlpatterns = [
     # Payments -----------------------------------------------------
-    path("payments/initiate/", InitiatePaymentView.as_view(), name='initiate-payment'),
-    path("payment/verify/", VerifyPaymentView.as_view(), name='verify-payment'),
+    path("initiate/", InitiatePaymentView.as_view(), name='initiate-payment'),
+    path("verify/", VerifyPaymentView.as_view(), name='verify-payment'),
 
     # Wallet -----------------------------------------------
 

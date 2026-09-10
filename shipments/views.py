@@ -10,6 +10,7 @@ from django.http import HttpResponse
 from payments.models import Payment
 from datetime import timedelta
 from django.db.models import Count, Q, Sum
+from payments.services import *
 
 
 class ServiceTypeListView(generics.ListAPIView):
@@ -32,7 +33,8 @@ class RateCalculatorView(views.APIView):
             declared_value= float(d["declared_value"]),
         )
 
-        return Response(RateResultSerializer(result).data)
+        return Response(result)
+        # return Response(RateResultSerializer(result).data)
 
 class ShipmentListCreateView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -59,45 +61,111 @@ class ShipmentListCreateView(generics.ListCreateAPIView):
         ctx["distance_km"] = float(self.request.data.get("distance_km", 0))
         return ctx
 
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        shipment = serializer.save()
+        if shipment.payment_method == "wallet":
+            try:
+                pay_with_wallet(shipment, request.user)
+            except ValueError as e:
+                return Response({**serializer.data, "warning" : str(e)}, status=status.HTTP_201_CREATED)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
 class ShipmentDetailView(generics.RetrieveUpdateAPIView):
     serializer_class = ShipmentDetailsSerializer
     permission_classes = [permissions.IsAuthenticated, IsOwnerOrAdminOrStaff]
 
     def get_queryset(self):
-        return Shipment.objects.select_related("service_type", "sender").prefetch_related("tracking_events")
+        return Shipment.objects.select_related("service_type", "sender", "assigned_driver", "origin_branch").prefetch_related("tracking_events")
 
+class ShipmentLabelView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        shipment = get_object_or_404(Shipment, pk=pk)
+        self.check_object_permissions(request, shipment)
+        pdf_bytes = generate_parcel_label_pdf(shipment)
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="label_{shipment.shipment_code}.pdf"'
+        return response
+
+    
 class PublicTrackView(views.APIView):
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, code):
-        shipment = get_object_or_404(Shipment, shipment_code=code.upper())
-        events = TrackingEvent.objects.filter(shipment=shipment)
+        shipment = get_object_or_404(Shipment, shipment_code=code.strip().upper())
+        events = TrackingEvent.objects.filter(shipment=shipment).order_by("timestamp")
+
         return Response({
             "shipment_code" : shipment.shipment_code,
             "status" : shipment.status,
             "service" : shipment.service_type.name,
             "sender_city" : shipment.sender_city,
-            "reciever_name" : shipment.receiver_name,
-            "reciever_city" : shipment.receiver_city,
-            "reciever_state" : shipment.receiver_state,
+            "receiver_name" : shipment.receiver_name,
+            "receiver_city" : shipment.receiver_city,
+            "receiver_state" : shipment.receiver_state,
+            "weight_kg" : str(shipment.weight_kg),
+            "is_fragile" : shipment.is_fragile,
+            "description" : shipment.description,
             "estimated_delivery" : shipment.estimated_delivery,
+            "created_at" : shipment.created_at,
             "events" : TrackingEventsSerializer(events, many=True).data
-            if "TrackingEventsSerializer" in dir() else [],
+        })
+
+class AuthenticatedTrackView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, code):
+        if request.user.role in ("admin", "staff"):
+            shipment = get_object_or_404(Shipment, shipment_code=code.strip().upper())
+        else:
+            shipment = get_object_or_404(Shipment, shipment_code=code.strip().upper(), sender=request.user)
+
+        events = TrackingEvent.objects.filter(shipment=shipment).order_by("timestamp")
+
+        return Response({
+            "shipment_code" : shipment.shipment_code,
+            "status" : shipment.status,
+            "service" : shipment.service_type.name,
+            "is_paid" : shipment.is_paid,
+            "payment_method" : shipment.payment_method,
+            "total_price" : str(shipment.total_price),
+            "sender_name" : shipment.sender_name,
+            "sender_city" : shipment.sender_city,
+            "sender_state" : shipment.sender_state,
+            "sender_phone" : shipment.sender_phone,
+            "sender_address" : shipment.sender_address,
+            "receiver_name" : shipment.receiver_name,
+            "receiver_phone" : shipment.receiver_phone,
+            "receiver_address" : shipment.receiver_address,
+            "receiver_city" : shipment.receiver_city,
+            "receiver_state" : shipment.receiver_state,
+            "weight_kg" : str(shipment.weight_kg),
+            "is_fragile" : shipment.is_fragile,
+            "description" : shipment.description,
+            "declared_value" : str(shipment.declared_value),
+            "estimated_delivery" : shipment.estimated_delivery,
+            "created_at" : shipment.created_at,
+            "updated_at" : shipment.updated_at,
+            "driver_name" : (shipment.assigned_driver.user.full_name if shipment.assigned_driver else None),
+            "driver_phone" : (shipment.assigned_driver.user.phone if shipment.assigned_driver else None ),
+            "events" : TrackingEventsSerializer(events, many=True).data
         })
 
 
-class AddTrackingEventView(generics.CreateAPIView):
+class AddTrackingEventView(views.APIView):
     permission_classes = [permissions.IsAuthenticated, IsAdminOrStaff]
 
-    def create(self, request, pk):
+    def post(self, request, pk):
         shipment = get_object_or_404(Shipment, pk=pk)
-        from .serializers import TrackingEventsSerializer
         serializer = TrackingEventsSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         event = serializer.save(shipment=shipment, created_by=request.user)
         status_map = {
             "in_transit" : "dispatched",
-            "out_of_delivery" : "dispatched",
+            "out_for_delivery" : "dispatched",
             "delivered" : "delivered",
             "returned" : "returned",
         }
@@ -110,16 +178,7 @@ class AddTrackingEventView(generics.CreateAPIView):
         notify_tracking_update(shipment, event)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-class ShipmentLabelView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
 
-    def get(self, request, pk):
-        shipment = get_object_or_404(Shipment, pk=pk)
-        self.check_object_permissions(request, shipment)
-        pdf_bytes = generate_parcel_label_pdf(shipment)
-        response = HttpResponse(pdf_bytes, content_type="application/pdf")
-        response["Content-Disposition"] = f'attachment; filename="label_{shipment.shipment_code}.pdf"'
-        return response
 
 class PickUpSlotListCreateView(generics.ListCreateAPIView):
     serializer_class = PickUpSlotSerializer
