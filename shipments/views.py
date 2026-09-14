@@ -185,9 +185,17 @@ class PickUpSlotListCreateView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        if self.request.user.role in ("admin", "staff"):
-            return PickUpSlot.objects.all()
-        return PickUpSlot.objects.filter(customer=self.request.user)
+        user = self.request.user
+        if user.role in ("admin", "staff"):
+            qs = PickUpSlot.objects.all()
+        else:
+            qs = PickUpSlot.objects.filter(customer=user)
+
+        status_filter = self.request.query_params.get("status")
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+
+        return qs.select_related("customer", "shipment").order_by("-slot_date", "-slot_time")
 
     def perform_create(self, serializer):
         serializer.save(customer=self.request.user)
@@ -198,10 +206,72 @@ class PickUpSlotDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        if self.request.user.role in ("admin", "staff"):
+        user = self.request.user
+        if user.role in ("admin", "staff"):
             return PickUpSlot.objects.all()
-        return PickUpSlot.objects.filter(customer=self.request.user)
+        return PickUpSlot.objects.filter(custome=user)
 
+    def destroy(self, request, *args, **kwargs):
+        slot = self.get_object()
+        if slot.status in ("completed",):
+            return Response({"detail" : "Completed pickups cannot be cancelled"}, status=status.HTTP_400_BAD_REQUEST)
+
+        slot.status = "cancelled"
+        slot.save(update_fields=["status"])
+        return Response({"detail" : "Pickup cancelled successfully"}, status=status.HTTP_200_OK)
+
+
+class PickupDashboardView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        today = timezone.now().date()
+
+        base_qs = PickUpSlot.objects.filter(customer=user).select_related("shipment").order_by("-slot_date", "-slot_time")
+        upcoming = base_qs.filter(slot_date__gte=today, status__in=["booked", "available"])
+        past = base_qs.filter(slot_date__lt=today) | base_qs.filter(status__in=["completed", "cancelled"])
+        past = past.distinct().order_by("-slot_date", "-slot_time")
+
+        booked_dates = list(base_qs.filter(status__in=["booked", "available"]).values_list("slot_date", flat=True))
+
+        def serialize_slot(slot):
+            return {
+                "id" : slot.id,
+                "slot_date" : str(slot.slot_date),
+                "slot_time" : str(slot.slot_time),
+                "address" : slot.address,
+                "city" : slot.city,
+                "status" : slot.status,
+                "notes" : slot.notes,
+                "shipment_code" : slot.shipment.shipment_code if slot.shipment else None,
+            }
+
+        return Response({
+            "upcoming" : [serialize_slot(s) for s in upcoming],
+            "past" : [serialize_slot(s) for s in past[:20]],
+            "booked_dates" : [str(d) for d in booked_dates],
+        })
+
+
+class CancelPickUpView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        slot = get_object_or_404(PickUpSlot, pk=pk, customer=request.user)
+
+        if slot.status == "completed":
+            return Response({"detail" : "Completed pickups cannot be cancelled"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if slot.status == "cancelled":
+            return Response({"detail" : "Pickup is already cancelled"}, status=status.HTTP_400_BAD_REQUEST)
+
+        slot.status = "cancelled"
+        slot.save(update_fields=["status"])
+        return Response({"detail" : "Pickup cancelled."})
+
+
+    
 class ProofOfDeliveryCreateView(generics.CreateAPIView):
     serializer_class = ProofOfDeliverySerializer
     permission_classes = [permissions.IsAuthenticated, IsDriver]

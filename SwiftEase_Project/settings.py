@@ -182,6 +182,7 @@ DEFAULT_FROM_EMAIL  = env("DEFAULT_FROM_EMAIL", default="noreply@swiftease.com")
 
 PAYSTACK_SECRET_KEY = env("PAYSTACK_SECRET_KEY", default="")
 PAYSTACK_PUBLIC_KEY = env("PAYSTACK_PUBLIC_KEY", default="")
+FRONTEND_URL = env("FRONTEND_URL", default="")
 
 TERMII_API_KEY = env("TERMII_API_KEY", default="")
 

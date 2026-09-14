@@ -23,9 +23,10 @@ urlpatterns = [
     path("track/auth/<str:code>/", AuthenticatedTrackView.as_view(), name='auth-track'),
 
     # Pickup scheduling ----------------------------------------
-
+    path("pickups/dashboard/", PickupDashboardView.as_view(), name='pickup-dashboard'),
     path("pickups/", PickUpSlotListCreateView.as_view(), name='pickup-list'),
     path("pickups/<int:pk>/", PickUpSlotDetailView.as_view(), name='pickup-detail'),
+    path("pickups/<int:pk>/cancel/", CancelPickUpView.as_view(), name='cancel-pickups')
 
    
 ]

@@ -8,8 +8,9 @@ urlpatterns = [
 
     # Wallet -----------------------------------------------
 
-    path("wallet/topup/", WalletTopUpView.as_view(), name='topup-wallet'),
-    path("wallet/pay/", WalletPayView.as_view(), name = 'wallet-pay'),
-    path("wallet/transactions/", WalletTransactionListView.as_view(), name='wallet-transactions'),
-
+    path("wallet/", WalletSummaryView.as_view(), name='wallet-summary'),
+    path("wallet/topup/init/", WalletTopUpInitView.as_view(), name = 'wallet-topup-init'),
+    path("wallet/topup/verify/", WalletTopupVerifyView.as_view(), name = 'wallet-topup-verify'),
+    path("wallet/pay/", WalletPayShipmentView.as_view(), name = 'wallet-pay'),
+    path("wallet/transactions/", WalletTransactionListView.as_view(), name = 'wallet-transactions'),
 ]

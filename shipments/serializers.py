@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import *
 from decimal import Decimal
 from accounts.serializers import UserSerializer
+from django.utils import timezone
 class ServiceTypeSerializer(serializers.ModelSerializer):
     class Meta:
         model = ServiceType
@@ -75,10 +76,27 @@ class ShipmentDetailsSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 class PickUpSlotSerializer(serializers.ModelSerializer):
+    shipment_code = serializers.CharField(source="shipment.shipment_code", read_only=True, default=None)
+    time_range = serializers.SerializerMethodField()
     class Meta:
         model = PickUpSlot
-        fields = "__all__"
-        read_only_fields = ["customer", "status"]
+        fields = ["id", "shipment", "shipment_code", "time_range", "slot_date", "slot_time", "address", "city", "status", "notes", "created_at"]
+        read_only_fields = ["customer", "status", "created_at", "shipment_code", "time_range"]
+
+    def get_time_range(self, obj):
+        if not obj.slot_time:
+            return ""
+        hour = obj.slot_time.hour
+        if hour < 12:
+            return "8:00 AM - 12:00 PM"
+        elif hour < 16:
+            return "12:00 PM - 4:00 PM"
+        else:
+            return "4:00 PM - 7:00 PM"
+    def validate_slot_date(self, value):
+        if value < timezone.now().date():
+            raise serializers.ValidationError("Pickup date cannot be in the past.")
+        return value
 
 
 class ProofOfDeliverySerializer(serializers.ModelSerializer):
