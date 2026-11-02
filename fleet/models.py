@@ -1,5 +1,6 @@
 from django.db import models
 from accounts.models import User
+
 class Branch(models.Model):
     name = models.CharField(max_length=120)
     address = models.CharField(max_length=255)

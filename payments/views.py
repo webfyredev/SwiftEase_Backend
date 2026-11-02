@@ -11,6 +11,28 @@ from django.conf import settings
 
 
 
+class WalletSummaryView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        unpaid = Shipment.objects.filter(sender=user, is_paid=False).exclude(status__in=['cancelled', 'returned']).order_by('created_at')
+        unpaid_list = [
+            {
+                "id" : str(s.id),
+                "shipment_code" : s.shipment_code,
+                "receiver_name" : s.receiver_name,
+                "receiver_city" : s.receiver_city,
+                "total_price" : str(s.total_price)
+            } for s in unpaid
+
+        ]
+        return Response({
+            "wallet_balance" : str(user.wallet_balance),
+            "unpaid_shipments" : unpaid_list
+        })
+
+    
 class WalletTopUpInitView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -32,7 +54,7 @@ class WalletTopUpInitView(views.APIView):
                 "reference" : reference,
                 "metadata" : {
                     "topup" : True,
-                    "user_id" : (user.id),
+                    "user_id" : str(user.id),
                     "amount" : amount,
                 },
                 "callback_url" : f"{settings.FRONTEND_URL}/customer/wallet?ref={reference}"
@@ -51,7 +73,7 @@ class WalletTopUpInitView(views.APIView):
             }, status=status.HTTP_502_BAD_GATEWAY)
 
         return Response({
-            "authorization_url" : data['authorization_url'],
+            "authorization_url" : data["authorization_url"],
             "reference" : reference,
             "amount" : amount
         })
@@ -75,7 +97,7 @@ class WalletTopupVerifyView(views.APIView):
             return Response({"detail" : "Payment was not successful.", "status" : data['status']}, status=status.HTTP_400_BAD_REQUEST)
         if not reference.startswith("WLTOPUP-"):
             return Response({
-                "detail" : "Invalid Reference type"
+                "detail" : "Invalid Reference type."
             }, status=status.HTTP_400_BAD_REQUEST)
 
         already = WalletTransaction.objects.filter(description__icontains=reference).exists()
@@ -123,26 +145,7 @@ class WalletPayShipmentView(views.APIView):
 
 
 
-class WalletSummaryView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
 
-    def get(self, request):
-        user = request.user
-        unpaid = Shipment.objects.filter(sender=user, is_paid=False).exclude(status__in=['cancelled', 'returned']).order_by('created_at')
-        unpaid_list = [
-            {
-                "id" : str(s.id),
-                "shipment_code" : s.shipment_code,
-                "receiver_name" : s.receiever_name,
-                "receiver_city" : s.receiver_city,
-                "total_price" : str(s.total_price)
-            } for s in unpaid
-
-        ]
-        return Response({
-            "wallet_balance" : str(user.wallet_balance),
-            "unpaid_shipments" : unpaid_list
-        })
 
 
 class WalletTransactionListView(generics.ListAPIView):
@@ -151,6 +154,8 @@ class WalletTransactionListView(generics.ListAPIView):
 
     def get_queryset(self):
         return WalletTransaction.objects.filter(user=self.request.user).order_by("-created_at")
+
+
 
 class InitiatePaymentView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]

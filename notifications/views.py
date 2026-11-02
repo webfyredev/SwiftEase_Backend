@@ -10,8 +10,25 @@ class NotificationListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return Notification.objects.filter(user=self.request.user)
+        qs = Notification.objects.filter(user=self.request.user)
 
+        notif_type = self.request.query_params.get("type")
+        if notif_type:
+            qs = qs.filter(notif_type=notif_type)
+        unread = self.request.query_params.get("unread")
+        if unread == "true":
+            qs = qs.filter(is_read=False)
+
+        return qs
+
+class NotificationUnreadCountView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        count = Notification.objects.filter(user=request.user, is_read=False).count()
+        return Response({"unread_count" : count })
+
+    
 class MarkNotificationReadView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -25,6 +42,13 @@ class MarkAllReadView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        Notification.objects.filter(user=request.user, is_read=False).update(is_read=True)
-        return Response({"detail" : "All notification marked as read."})
+        updated = Notification.objects.filter(user=request.user, is_read=False).update(is_read=True)
+        return Response({"detail" : "All notification marked as read.", "updated" : updated})
 
+class DeleteNotificationView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def delete(self, request, pk):
+        notif = get_object_or_404(Notification, pk=pk, user=request.user)
+        notif.delete()
+        return Response({"detail" : "Notification deleted."}, status=204)

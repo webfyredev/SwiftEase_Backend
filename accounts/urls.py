@@ -8,6 +8,7 @@ urlpatterns = [
     path("auth/token/refresh/", TokenRefreshView.as_view(), name='refresh'),
     path("auth/logout/", TokenBlacklistView.as_view(), name='logout'),
     path("auth/profile/", ProfileView.as_view(), name="profile"),
+    path("auth/avatar/", AvatarUploadView.as_view(), name='avatar-upload'),
     path("auth/change-password/", ChangePasswordView.as_view(), name='reset-password'),
 
     # Addresses --------------------------------------------------------------

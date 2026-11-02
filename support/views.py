@@ -61,7 +61,7 @@ class TicketReplyCreateView(views.APIView):
 
         reply = TicketReply.objects.create(ticket=ticket, author=user, message=message)
 
-        if reply.status == "resolved" and user.role == "customer":
+        if ticket.status == "resolved" and user.role == "customer":
             ticket.status = "open"
             ticket.save(update_fields=["status"])
 
