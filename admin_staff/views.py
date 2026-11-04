@@ -36,7 +36,7 @@ class AdminOverviewView(APIView):
         total_shipments = Shipment.objects.count()
         shipments_today = Shipment.objects.filter(created_at__date=today).count()
         pending_action = Shipment.objects.filter(status__in=['confirmed', 'processing']).count()
-        delivered_today = Shipment.objects.filtr(updated_at__date=today, status='delivered').count()
+        delivered_today = Shipment.objects.filter(updated_at__date=today, status='delivered').count()
         total_revenue = Payment.objects.filter(status='success').aggregate(t=Sum("amount"))['t'] or 0
         month_revenue = Payment.objects.filter(status='success', paid_at__date__gte=month_start).aggregate(t=Sum("amount"))['t'] or 0
         today_revenue = Payment.objects.filter(status="success", paid_at__date=today).aggregate(t=Sum("amount"))['t'] or 0
@@ -76,6 +76,7 @@ class AdminOverviewView(APIView):
             return{
                 "name" : d.user.full_name,
                 "vehicle" : d.vehicle.plate_number if d.vehicle else "",
+                "vehicle_type" : d.vehicle.vehicle_type if d.vehicle else "",
                 "rating" : str(d.rating),
             }
 
@@ -93,7 +94,7 @@ class AdminOverviewView(APIView):
             }
         
         return Response({
-            "kpis" : {
+            "res" : {
                 "total_shipments" : total_shipments,
                 "shipments_today" : shipments_today,
                 "pending_action" : pending_action,
@@ -134,13 +135,13 @@ class AdminShipmentListView(generics.ListAPIView):
             qs = qs.filter(is_paid=is_paid == "true")
 
         if date_from:
-            qs = qs.ilter(created_at__date__gte=date_from)
+            qs = qs.filter(created_at__date__gte=date_from)
 
         if date_to:
             qs = qs.filter(created_at__date__lte=date_to)
 
         if search:
-            qs = qs.filter(Q(shipment_code__icontains=search)| Q(sender_name__icontains=search)| Q(receiver_name__icontains=search)|Q(receiver_city__icontains=search))
+            qs = qs.filter(Q(shipment_code__icontains=search)| Q(sender_name__icontains=search)| Q(receiver_name__icontains=search)|Q(receiver_city__icontains=search)|Q(sender_city__icontains=search))
 
         paginator = CustomPagination()
         paginated_qs = paginator.paginate_queryset(qs, request)
@@ -162,13 +163,13 @@ class AdminShipmentListView(generics.ListAPIView):
                 "driver" : s.assigned_driver.user.full_name if s.assigned_driver else None,
                 "created_at" : s.created_at
             }
-        return({
-            "pagiantion" : {
+        return Response({
+            "pagination" : {
                 "count" : paginator.page.paginator.count,
                 "next" : paginator.get_next_link(),
                 "previous" : paginator.get_previous_link(),
                 "current_page" : paginator.page.number,
-                "total_pages" : paginator.page.paginator.num_pages
+                "total_pages" : paginator.page.paginator.num_pages,
             },
             "results" : [serialize(s) for s in paginated_qs]
         })
@@ -201,18 +202,22 @@ class AdminShipmentDetailView(APIView):
         ]
         return Response({
             "id" : str(shp.id),
-            "shipment-code" : shp.shipment_code,
+            "shipment_code" : shp.shipment_code,
             "status" : shp.status,
             "service" : shp.service_type.name,
             "sender_name" : shp.sender_name,
             "sender_phone" : shp.sender_phone,
             "sender_address" : shp.sender_address,
             "sender_city" : shp.sender_city,
+            "sender_state" : shp.sender_state,
 
             "receiver_name" : shp.receiver_name,
             "receiver_phone" : shp.receiver_phone,
             "receiver_address" : shp.receiver_address,
             "receiver_city" : shp.receiver_city,
+            "receiver_state" : shp.receiver_state,
+
+
             "weight_kg" : shp.weight_kg,
             "is_fragile" : shp.is_fragile,
             "description" : shp.description,
@@ -263,7 +268,6 @@ class AdminUpdateShipmentStatusView(APIView):
         TrackingEvent.objects.create(
             shipment = shipment,
             status= event_status,
-            status=status,
             location = location,
             description = description or f"Status updtaed to {new_status}",
             created_by = request.user,
@@ -279,3 +283,166 @@ class AdminUpdateShipmentStatusView(APIView):
         )
 
         return Response({"detail" : "Status updated", "status" : new_status})
+
+
+class AdminAssignDriverView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrStaff]
+
+    def patch(self, request, pk):
+        shipment = get_object_or_404(Shipment, pk=pk)
+        driver_id = request.data.get('driver_id')
+
+        if not driver_id:
+            return Response({"detail" : "Driver id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        driver = get_object_or_404(DriverProfile, id=driver_id)
+
+        shipment.assigned_driver = driver
+        shipment.save(update_fields=['assigned_driver'])
+
+        Notification.objects.create(
+            user = driver.user,
+            title = "New Delivery assigned",
+            message = f"You have been assigned shipment {shipment.shipment_code} to {shipment.receiver_city}",
+            notif_type = "shipment"
+        )
+
+        return Response({"detail" : "Driver assigned", "driver" : driver.user.full_name})
+
+
+
+class AdminDriverListView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrStaff]
+
+    def get(self, request):
+        profiles = DriverProfile.objects.select_related('user', 'vehicle', 'branch').order_by('-user__date_joined')
+
+        def serialize(d):
+            delivered = Shipment.objects.filter(assigned_driver=d, status='delivered').count()
+            return{
+                "id" : d.id,
+                "full_name" : d.user.full_name,
+                "email" : d.user.email,
+                "phone" : d.user.phone,
+                "is_on_duty" : d.is_on_duty,
+                "rating" : str(d.rating),
+                "vehicle" : f"{d.vehicle.plate_number} ({d.vehicle.vehicle_type})" if d.vehicle else None,
+                "branch" : d.branch.name,
+                "deliveries" : delivered,
+                "last_seen" : d.last_location_update,
+            }
+
+        return Response([serialize(d) for d in profiles]) 
+
+
+class AdminTicketListView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrStaff]
+
+    def get(self, request):
+        status = request.query_params.get('status')
+        qs = SupportTicket.objects.select_related('user', 'shipment', 'assigned_to').prefetch_related('ticket_replies')
+
+        if status:
+            qs = qs.filter(status=status)
+
+        paginator = CustomPagination()
+        paginated_tk = paginator.paginate_queryset(qs, request)
+
+        def serialize(t):
+            return{
+                "id" : str(t.id),
+                "ticket_no" : t.ticket_no,
+                "user_name" : t.user.full_name,
+                "user_email" : t.user.email,
+                "category" : t.get_category_display(),
+                "subject" : t.subject,
+                "status" : t.status,
+                "assigned_to" : t.assigned_to.full_name if t.assigned_to else None,
+                "reply_count" : t.ticket_replies.count(),
+                "created_at" : t.created_at,
+                "updated_at" : t.updated_at
+            }
+        return Response({
+            "pagination" : {
+                "count" : paginator.page.paginator.count,
+                "previous" : paginator.get_previous_link(),
+                "next" : paginator.get_next_link(),
+                "current_page" : paginator.page.number,
+                "total_page" : paginator.page.paginator.num_pages,
+            },
+            "ticket_data" : [serialize(t) for t in paginated_tk]
+            
+        })
+
+class AdminTicketDetailView(APIView):
+    permission_classes  = [permissions.IsAuthenticated, IsAdminOrStaff]
+
+    def get(self, request, pk):
+        ticket = get_object_or_404(SupportTicket.objects.select_related("user", 'shipment').prefetch_related("ticket_replies__author"), pk=pk)
+        replies = [
+            {
+                "id" : r.id,
+                "author_name" : r.author.full_name,
+                "is_staff" : r.author.role in ("admin", "staff"),
+                "message" : r.message,
+                "created_at" : r.created_at
+            } for r in ticket.ticket_replies.order_by('-created_at')
+        ]
+
+        return Response({
+            "id" : str(ticket.id),
+            "ticket_no" : ticket.ticket_no,
+            "user_name" : ticket.user.full_name,
+            "user_email" : ticket.user.email,
+            "category" : ticket.get_category_display(),
+            "subject" : ticket.subject,
+            "description" : ticket.description,
+            "status" : ticket.status,
+            "shipment_code" : ticket.shipment.shipment_code if ticket.shipment else None,
+            "replies" : replies,
+            "created_at" : ticket.created_at
+        })
+
+class AdminTicketReplyView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrStaff]
+
+    def post(self, request, pk):
+        ticket = get_object_or_404(SupportTicket, pk=pk)
+        message = request.data.get('message', "").strip()
+
+        if not message:
+            return Response({"detail" : "Message is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        reply = TicketReply.objects.create(
+            ticket=ticket,
+            author = request.user,
+            message=message
+        )
+        if ticket.status == "open":
+            ticket.status = "in_progress"
+            ticket.save(update_fields=['status'])
+
+
+        Notification.objects.create(
+            user = request.user, 
+            title = f"Reply on Ticket {ticket.ticket_no}",
+            message = f"SwiftEase Supportreplied to your ticket: {ticket.subject}",
+            notif_type ="system"
+        )
+
+        return Response({
+            "id" : reply.id,
+            "author_name" : reply.author.full_name, 
+            "message" : reply.message,
+            "created_at" : reply.created_at 
+        }, status=status.HTTP_201_CREATED)
+
+
+class AdminTicketUpdateStatusView(APIView):
+    permission_classes=[permissions.IsAuthenticated, IsAdminOrStaff]
+
+    def path(self, request, pk):
+        ticket = get_object_or_404(SupportTicket, pk=pk)
+        new_status = request.data.get('status')
+        ticket.save(update_fields=['status'])
+        return Response({"status" : ticket.status})

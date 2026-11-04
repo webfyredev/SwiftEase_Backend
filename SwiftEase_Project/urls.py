@@ -28,5 +28,6 @@ urlpatterns = [
     path('api/shipments/', include('shipments.urls')),
     path('api/support/', include('support.urls')),
     path('api/drivers/', include('drivers.urls')),
+    path('api/ad_stffs/', include('admin_staff.urls')),
 
 ]+ static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
